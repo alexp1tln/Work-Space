@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "Folder": {
+      "title": "Folder",
+      "description": "A directory in the shared workspace",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "parentId": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["name", "createdAt", "updatedAt"]
+    },
+    "FileRecord": {
+      "title": "File Record",
+      "description": "A file in the shared workspace",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "parentId": { "type": ["string", "null"] },
+        "size": { "type": "string" },
+        "type": { "type": "string" },
+        "content": { "type": "string" },
+        "uploaderId": { "type": "string" },
+        "uploaderName": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "size", "type", "content", "createdAt", "updatedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task in the shared kanban board",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["todo", "progress", "done"] },
+        "assignee": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "description", "status", "assignee", "createdAt", "updatedAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "A shared calendar event",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "time": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["title", "time", "date", "createdAt", "updatedAt"]
+    },
+    "SafeEntry": {
+      "title": "Safe Entry",
+      "description": "A secure credential entry",
+      "type": "object",
+      "properties": {
+        "service": { "type": "string" },
+        "login": { "type": "string" },
+        "password": { "type": "string" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["service", "login", "password", "note", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile with personal settings",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "theme": { "type": "string" },
+        "status": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["username", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Direct Message",
+      "description": "A direct message between two users",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["senderId", "receiverId", "content", "createdAt"]
+    },
+    "Activity": {
+      "title": "Global Activity Notification",
+      "description": "A notification about actions in the platform",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actionType": { "type": "string" },
+        "targetName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["actorId", "actorName", "actionType", "targetName", "createdAt"]
+    },
+    "PushSubscription": {
+      "title": "Push Subscription",
+      "description": "Web Push subscription detail for a user device",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "endpoint": { "type": "string" },
+        "keys": {
+          "type": "object",
+          "properties": {
+            "p256dh": { "type": "string" },
+            "auth": { "type": "string" }
+          },
+          "required": ["p256dh", "auth"]
+        },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "endpoint", "keys", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User Profiles"
+    },
+    "/folders/{folderId}": {
+      "schema": { "$ref": "#/entities/Folder" },
+      "description": "Folder hierarchy"
+    },
+    "/files/{fileId}": {
+      "schema": { "$ref": "#/entities/FileRecord" },
+      "description": "File entries"
+    },
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Kanban workspace tasks"
+    },
+    "/events/{eventId}": {
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Calendar events"
+    },
+    "/safeEntries/{safeId}": {
+      "schema": { "$ref": "#/entities/SafeEntry" },
+      "description": "Secure passwords and API credentials"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Direct messages"
+    },
+    "/activities/{activityId}": {
+      "schema": { "$ref": "#/entities/Activity" },
+      "description": "Global activity feed"
+    },
+    "/push_subscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/PushSubscription" },
+      "description": "Push Subscriptions for user devices"
+    }
+  }
+}
