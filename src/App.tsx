@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, User, updateProfile } from 'firebase/auth';
-import { doc, setDoc, getDoc, collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { getToken, onMessage } from 'firebase/messaging';
 import { auth, db, messagingPromise } from './firebase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -24,62 +24,28 @@ export default function App() {
   const [authError, setAuthError] = useState("");
 
   useEffect(() => {
-    let unsubProfile: (() => void) | null = null;
-    let heartbeatInterval: any = null;
-    
-    // One-time cleanup for users that are NOT Александр or Ася
-    const cleanupUsers = async () => {
-       try {
-         const snap = await import('firebase/firestore').then(firestore => firestore.getDocs(firestore.collection(db, 'users')));
-         for (const d of snap.docs) {
-           const data = d.data();
-           const name = data.username || data.email;
-           if (name !== 'Александр' && name !== 'Ася' && d.id !== auth.currentUser?.uid) {
-               await import('firebase/firestore').then(firestore => firestore.deleteDoc(firestore.doc(db, 'users', d.id)));
-           }
-         }
-       } catch (e) {
-         console.error('Failed to cleanup users:', e);
-       }
-    };
-
-    const unsub = onAuthStateChanged(auth, (u) => {
+    // ИСПРАВЛЕНИЕ: убран heartbeat (каждую минуту писал в Firestore = 167K writes)
+    // ИСПРАВЛЕНИЕ: заменён onSnapshot на getDoc для профиля (достаточно один раз при входе)
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        import('firebase/firestore').then(({ onSnapshot, doc, updateDoc }) => {
-           unsubProfile = onSnapshot(doc(db, "users", u.uid), (snap) => {
-              if (snap.exists()) setUserProfile(snap.data());
-           });
-           
-           // Heartbeat
-           const updateHeartbeat = () => {
-               updateDoc(doc(db, "users", u.uid), {
-                   updatedAt: new Date().toISOString()
-               }).catch(() => {});
-           };
-           updateHeartbeat();
-           heartbeatInterval = setInterval(updateHeartbeat, 60000); // 1 minute
-           
-           // Run cleanup
-           cleanupUsers();
-        });
+        try {
+          const snap = await getDoc(doc(db, "users", u.uid));
+          if (snap.exists()) setUserProfile(snap.data());
+        } catch (e) {
+          console.error('Failed to load profile', e);
+        }
       } else {
         setUserProfile(null);
-        if (unsubProfile) unsubProfile();
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
       }
       setLoading(false);
     });
-    return () => {
-      unsub();
-      if (unsubProfile) unsubProfile();
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
-    };
+    return () => unsub();
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    
+
     // Request permission once logged in
     if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
         Notification.requestPermission().then(() => {
@@ -99,117 +65,89 @@ export default function App() {
 
     const registerPushSubscription = async () => {
         try {
-            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-                console.log('Push notifications are not supported in this browser');
-                return;
-            }
-            if (Notification.permission !== 'granted') return;
+            if ('Notification' in window && Notification.permission === 'granted') {
+                // Wait for generic Service Worker (for fallback web-push)
+                const reg = await navigator.serviceWorker.ready;
 
-            // Wait for generic Service Worker (for fallback web-push)
-            const reg = await navigator.serviceWorker.ready;
-            if (!reg) return;
+                // --- 1. FCM Initialisation (if configured) ---
+                try {
+                  const messaging = await messagingPromise;
+                  const fcmVapidKey = (await import('../firebase-applet-config.json')).fcmVapidKey;
 
-            // --- 1. FCM Initialisation (if configured) ---
-            try {
-              const messaging = await messagingPromise;
-              const fcmVapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY;
-              if (messaging && fcmVapidKey) {
-                 // Register messaging Service worker explicitly
-                 const fcmReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                 const fcmToken = await getToken(messaging, { 
-                   vapidKey: fcmVapidKey, 
-                   serviceWorkerRegistration: fcmReg 
-                 });
-                 if (fcmToken) {
-                    await fetch('/api/push/subscribe', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            subscription: { fcmToken }, // Send FCM token securely
-                            userId: user.uid
-                        })
-                    });
-                    console.log('FCM Device synchronized successfully!');
-                    
-                    onMessage(messaging, (payload) => {
-                      console.log('FCM Foreground message: ', payload);
-                      // In-app alert could be shown here, or just let system handle
-                    });
-                    return; // Quit early and skip web-push fallback since FCM worked
-                 }
-              }
-            } catch(e) {
-              console.warn('FCM setup skipped/failed, falling back to web-push...', e);
-            }
-
-            // --- 2. Fallback Web-push initialization ---
-            // Fetch public VAPID key
-            const res = await fetch('/api/push/vapid-public-key');
-            if (!res.ok) throw new Error('VAPID key fetch failed');
-            const { publicKey } = await res.json();
-
-            // Convert Base64 VAPID Key to Uint8Array
-            const urlBase64ToUint8Array = (base64String: string) => {
-                 try {
-                     const padding = '='.repeat((4 - base64String.length % 4) % 4);
-                     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-                     const rawData = window.atob(base64);
-                     const outputArray = new Uint8Array(rawData.length);
-                     for (let i = 0; i < rawData.length; ++i) {
-                         outputArray[i] = rawData.charCodeAt(i);
+                  if (messaging && fcmVapidKey) {
+                     // Register messaging Service worker explicitly
+                     const fcmReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+                     const fcmToken = await getToken(messaging, { 
+                        vapidKey: fcmVapidKey,
+                        serviceWorkerRegistration: fcmReg
+                     });
+                     if (fcmToken) {
+                        await fetch('/api/push/subscribe', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                subscription: { fcmToken }, // Send FCM token securely
+                                userId: user.uid
+                            })
+                        });
+                        console.log('FCM Device synchronized successfully!');
+                        onMessage(messaging, (payload) => {
+                          console.log('FCM Foreground message: ', payload);
+                        });
+                        return; // Quit early and skip web-push fallback since FCM worked
                      }
-                     return outputArray;
-                 } catch (e) {
-                     console.error('Failed to parse VAPID key', e);
-                     throw e; // Do not return raw string, let it fail explicitly
-                 }
-            };
+                  }
+                } catch (e) {
+                  console.warn('FCM setup skipped/failed, falling back to web-push...', e);
+                }
 
-            const convertedKey = urlBase64ToUint8Array(publicKey);
+                // --- 2. Fallback Web-push initialization ---
+                const res = await fetch('/api/push/vapid-public-key');
+                const { publicKey } = await res.json();
 
-            // Subscribe with stale validation check
-            let sub = await reg.pushManager.getSubscription();
-            if (sub) {
-                const subKey = sub.options.applicationServerKey;
-                if (subKey) {
-                    const subKeyArr = new Uint8Array(subKey);
-                    let match = subKeyArr.length === convertedKey.length;
-                    if (match) {
-                        for (let i = 0; i < convertedKey.length; i++) {
-                            if (subKeyArr[i] !== convertedKey[i]) {
-                                match = false;
-                                break;
-                            }
-                        }
+                const urlBase64ToUint8Array = (base64String: string) => {
+                    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                    const rawData = window.atob(base64);
+                    const outputArray = new Uint8Array(rawData.length);
+                    for (let i = 0; i < rawData.length; ++i) {
+                        outputArray[i] = rawData.charCodeAt(i);
                     }
-                    if (!match) {
-                        console.log('Stale VAPID key detected, unsubscribing...');
+                    return outputArray;
+                };
+
+                let sub = await reg.pushManager.getSubscription();
+                if (sub) {
+                    try {
+                        const currentKey = sub.options.applicationServerKey
+                            ? btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey as ArrayBuffer)))
+                                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+                            : null;
+                        const newKey = publicKey.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+                        if (currentKey !== newKey) {
+                            await sub.unsubscribe();
+                            sub = null;
+                        }
+                    } catch {
                         await sub.unsubscribe();
                         sub = null;
                     }
-                } else {
-                    await sub.unsubscribe();
-                    sub = null;
                 }
-            }
 
-            if (!sub) {
-                sub = await reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: convertedKey
+                if (!sub) {
+                    sub = await reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: urlBase64ToUint8Array(publicKey)
+                    });
+                }
+
+                await fetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subscription: sub.toJSON(), userId: user.uid })
                 });
+                console.log('Device synchronized successfully with fallback background push engine!');
             }
-
-            // Sync with backend
-            await fetch('/api/push/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    subscription: sub,
-                    userId: user.uid
-                })
-            });
-            console.log('Device synchronized successfully with fallback background push engine!');
         } catch (e) {
             console.warn('Background push sync skipped:', e);
         }
@@ -229,42 +167,19 @@ export default function App() {
             console.log("Notification fallback failed", e);
         }
     };
-    
-    let isInitialActivities = true;
-    const unsubActivities = onSnapshot(query(collection(db, 'activities'), orderBy('createdAt', 'desc'), limit(1)), (snap) => {
-        if (isInitialActivities) {
-            isInitialActivities = false;
-            return;
-        }
-        snap.docChanges().forEach(change => {
-            if (change.type === 'added') {
-                const data = change.doc.data();
-                if (data.userId !== user.uid && 'Notification' in window && Notification.permission === 'granted') {
-                    if (document.hidden) {
-                        showNotification('Новая активность', {
-                            body: `${data.userName || 'Кто-то'} ${data.action} ${data.targetName || ''}`,
-                            icon: '/vite.svg'
-                        });
-                    }
-                }
-            }
-        });
-    });
 
+    // ИСПРАВЛЕНИЕ: оставлены только 2 лёгких слушателя с limit(1) для foreground-уведомлений
     let isInitialMessages = true;
     const unsubMessages = onSnapshot(query(collection(db, 'messages'), orderBy('createdAt', 'desc'), limit(1)), (snap) => {
-        if (isInitialMessages) {
-            isInitialMessages = false;
-            return;
-        }
+        if (isInitialMessages) { isInitialMessages = false; return; }
         snap.docChanges().forEach(change => {
              if (change.type === 'added') {
                  const data = change.doc.data();
                  if (data.senderId !== user.uid && 'Notification' in window && Notification.permission === 'granted') {
                      if (document.hidden) {
-                         showNotification('Новое сообщение', {
-                             body: `${data.senderName || 'Аноним'}: ${data.text}`,
-                             icon: '/vite.svg'
+                         showNotification('Новое сообщение 💬', {
+                             body: `${data.senderName || 'Аноним'}: ${data.content || data.text || ''}`,
+                             icon: '/icon-512.png'
                          });
                       }
                  }
@@ -273,7 +188,6 @@ export default function App() {
     });
 
     return () => {
-        unsubActivities();
         unsubMessages();
     };
   }, [user]);
@@ -283,10 +197,8 @@ export default function App() {
     setAuthError("");
     if (!username || !password) return;
     
-    // Auto-generate email if only username is provided
     let email = username;
     if (!username.includes('@')) {
-       // Convert each character to hex to ensure unique valid emails for cyrillic/unicode names
        const safeName = username.split('').map(c => c.charCodeAt(0).toString(16)).join('');
        email = `${safeName}@app.local`;
     }
@@ -295,7 +207,7 @@ export default function App() {
       if (isRegistering) {
         const cred = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(cred.user, { displayName: username });
-        await setDoc(doc(db, "users", cred.user.uid), {
+        const profileData = {
              username,
              email,
              theme: "dark",
@@ -303,13 +215,13 @@ export default function App() {
              avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cred.user.uid}`,
              createdAt: new Date().toISOString(),
              updatedAt: new Date().toISOString()
-        });
+        };
+        await setDoc(doc(db, "users", cred.user.uid), profileData);
+        setUserProfile(profileData);
       } else {
         const cred = await signInWithEmailAndPassword(auth, email, password);
-        // Optionally update last login
-        await setDoc(doc(db, "users", cred.user.uid), {
-             updatedAt: new Date().toISOString()
-        }, { merge: true });
+        const snap = await getDoc(doc(db, "users", cred.user.uid));
+        if (snap.exists()) setUserProfile(snap.data());
       }
     } catch (e: any) {
       setAuthError(e.message.replace("Firebase:", "Системная ошибка:").replace("auth/invalid-credential", "Неверный логин или пароль").replace("auth/email-already-in-use", "Логин уже используется"));
@@ -323,7 +235,6 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-[#030303] relative overflow-hidden">
-        {/* Static Abstract Geometric Elements for Auth Page */}
         <div className="absolute inset-0 z-0 pointer-events-none opacity-20">
           <div className="absolute -top-[10%] -left-[10%] w-[60vw] h-[60vw] border-[1px] border-indigo-500/10 rounded-full" />
           <div className="absolute top-[20%] -right-[20%] w-[70vw] h-[70vw] border-[1px] border-purple-500/10 rounded-full" />
@@ -337,9 +248,7 @@ export default function App() {
           className="w-full max-w-sm flex flex-col items-center relative p-8 glass-panel rounded-[2.5rem]"
         >
           <div className="relative z-10 flex flex-col items-center w-full">
-            <div 
-              className="w-48 h-48 sm:w-64 sm:h-64 mb-8 flex items-center justify-center relative"
-            >
+            <div className="w-48 h-48 sm:w-64 sm:h-64 mb-8 flex items-center justify-center relative">
               <div className="absolute inset-2 bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0%,transparent_70%)] rounded-full" />
               <img src="https://i.ibb.co/Lz5djnMx/Promt-Support-logo-2-P-S-removebg-preview.png" alt="PS" className="w-40 h-40 sm:w-56 sm:h-56 object-contain drop-shadow-lg relative z-10" />
             </div>
@@ -381,7 +290,7 @@ export default function App() {
       case "chronos": return <CalendarModule />;
       case "network": return <NetworkModule />;
       case "safe": return <SafeModule />;
-      case "profile": return <ProfileModule user={user} />;
+      case "profile": return <ProfileModule user={user} onProfileUpdate={setUserProfile} />;
       default: return null;
     }
   };
@@ -389,7 +298,6 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col relative bg-[#030303] pb-32 overflow-x-hidden selection:bg-indigo-500/30">
       
-      {/* Ambient Moving Orbs Overlay (Optimized) */}
       <div className="fixed inset-0 z-0 pointer-events-none flex items-center justify-center opacity-30">
          <div className="absolute w-[150vw] h-[150vw]">
             <div className="absolute top-[20%] left-[20%] w-[40%] h-[40%] bg-[radial-gradient(circle_at_center,rgba(99,102,241,0.15)_0%,transparent_60%)] rounded-full" />
@@ -439,7 +347,6 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* Floating Interactive Dock */}
       <motion.div 
         initial={{ y: 50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
