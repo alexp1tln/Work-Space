@@ -1,13 +1,21 @@
 {
-  "name": "WorkSpace SashAsya",
-  "short_name": "SashAsya",
+  "name": "WorkSpace",
+  "short_name": "𓆩^._.^𓆪",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
-  "icons": "icons": [
-  { "src": "launchericon-192x192.png", "sizes": "192x192", "type": "image/png" },
-  { "src": "180.png", "sizes": "180x180", "type": "image/png" },
-  { "src": "SmallTile.scale-200.png", "sizes": "200x200", "type": "image/png", "purpose": "maskable" }
-]
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
