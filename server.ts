@@ -80,7 +80,19 @@ async function sendPushToUser(userId: string, title: string, body: string, data:
           await admin.messaging().send({
             token: sub.fcmToken,
             notification: { title, body },
-            data: { url: data.url || '/' }
+            data: {
+              title: title,
+              body: body,
+              url: data.url || '/'
+            },
+            apns: {
+              payload: {
+                aps: {
+                  alert: { title, body },
+                  sound: 'default',
+                }
+              }
+            }
           });
           console.log(`FCM sent successfully to ${docSnap.id}`);
           return;
@@ -127,7 +139,19 @@ async function sendPushToAllExcept(excludeUserId: string, title: string, body: s
           await admin.messaging().send({
             token: sub.fcmToken,
             notification: { title, body },
-            data: { url: data.url || '/' }
+            data: {
+              title: title,
+              body: body,
+              url: data.url || '/'
+            },
+            apns: {
+              payload: {
+                aps: {
+                  alert: { title, body },
+                  sound: 'default',
+                }
+              }
+            }
           });
           console.log(`FCM sent to ${docSnap.id}`);
           return;
