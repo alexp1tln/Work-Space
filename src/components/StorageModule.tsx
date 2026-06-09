@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, query } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc, query, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { File, Folder as FolderIcon, Upload, X, Save, Image as ImageIcon } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -16,29 +16,37 @@ export function StorageModule() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const unsubUsers = onSnapshot(query(collection(db, 'users')), (snap) => {
+    // ИСПРАВЛЕНИЕ: users и folders — одноразовый getDocs, не onSnapshot
+    // Они меняются редко, нет смысла держать постоянный слушатель
+    getDocs(collection(db, 'users')).then(snap => {
       const uMap: Record<string, any> = {};
       snap.docs.forEach(d => uMap[d.id] = d.data());
       setUsers(uMap);
-    });
-    const unsubFolders = onSnapshot(query(collection(db, 'folders')), (snap) => {
+    }).catch(console.error);
+
+    getDocs(query(collection(db, 'folders'))).then(snap => {
       setFolders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
+    }).catch(console.error);
+
+    // ИСПРАВЛЕНИЕ: файлы оставляем onSnapshot — они меняются чаще (загрузка, удаление)
     const unsubFiles = onSnapshot(query(collection(db, 'files')), (snap) => {
       setFiles(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-    return () => { unsubUsers(); unsubFolders(); unsubFiles(); };
+
+    return () => { unsubFiles(); };
   }, []);
 
   const createFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    await addDoc(collection(db, 'folders'), {
+    const docRef = await addDoc(collection(db, 'folders'), {
       name: newFolderName,
       parentId: currentFolderId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
+    // Обновляем локальный стейт без лишнего запроса
+    setFolders(prev => [...prev, { id: docRef.id, name: newFolderName, parentId: currentFolderId }]);
     setNewFolderName("");
     setIsAddingFolder(false);
   };
@@ -46,6 +54,7 @@ export function StorageModule() {
   const deleteFolder = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await deleteDoc(doc(db, 'folders', id));
+    setFolders(prev => prev.filter(f => f.id !== id));
   };
   
   const deleteFile = async (id: string, e: React.MouseEvent) => {
@@ -121,7 +130,6 @@ export function StorageModule() {
           reader.readAsDataURL(file);
         });
         
-        // Approximate the base64 size back to bytes
         const approxBytes = Math.round((base64.length * 3) / 4);
         finalSize = formatSize(approxBytes);
 
@@ -170,7 +178,6 @@ export function StorageModule() {
     } else if (f.type?.startsWith('text/') || f.name.endsWith('.txt')) {
       setEditingFile(f);
     } else {
-      // Just download or show preview for other files
       const a = document.createElement('a');
       a.href = f.content;
       a.download = f.name;
@@ -317,4 +324,3 @@ export function StorageModule() {
     </div>
   );
 }
-
