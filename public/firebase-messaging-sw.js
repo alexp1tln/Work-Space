@@ -11,20 +11,26 @@ fetch('/firebase-applet-config.json')
     const messaging = firebase.messaging();
     
     messaging.onBackgroundMessage((payload) => {
-      console.log('[firebase-messaging-sw.js] Received background message ', payload);
-      const notificationTitle = payload.notification?.title || payload.data?.title || 'Новое уведомление';
-      const notificationOptions = {
-        body: payload.notification?.body || payload.data?.body || '',
-        icon: '/icon.png',
-        data: payload.data,
-      };
+  console.log('[firebase-messaging-sw.js] Received background message ', payload);
+  
+  const title = payload.notification?.title 
+    ?? payload.data?.title 
+    ?? 'Work Space';
+    
+  const body = payload.notification?.body 
+    ?? payload.data?.body 
+    ?? payload.data?.message
+    ?? '';
 
-      self.registration.showNotification(notificationTitle, notificationOptions);
-    });
-  })
-  .catch(err => {
-    console.error('SW failed to load config', err);
-  });
+  const notificationOptions = {
+    body: body,
+    icon: '/icon.png',
+    badge: '/icon.png',
+    data: payload.data || {},
+  };
+
+  self.registration.showNotification(title, notificationOptions);
+});
 
 // Handle standard Web Push (fallback when FCM Admin is not available)
 self.addEventListener('push', (event) => {
