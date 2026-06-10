@@ -9,8 +9,25 @@ import { getFirestore, collection, onSnapshot, query, orderBy, limit, doc, setDo
 import { createServer as createViteServer } from 'vite';
 
 // Read firebase configuration from config file
-const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+// Initialize Firebase config
+let firebaseConfig: any;
+try {
+  if (process.env.FIREBASE_CONFIG) {
+    firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
+  } else {
+    const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    const fs = require('fs');
+    if (fs.existsSync(configPath)) {
+      firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    } else {
+      console.warn("WARNING: firebase-applet-config.json not found and FIREBASE_CONFIG not set.");
+      firebaseConfig = {}; // Предотвращаем фатальное падение
+    }
+  }
+} catch (e) {
+  console.error("CRITICAL: Failed to parse Firebase configuration", e);
+  firebaseConfig = {};
+}
 
 // Initialize Firebase App (Client SDK for DB listeners)
 const firebaseApp = initializeApp(firebaseConfig);
@@ -304,11 +321,9 @@ async function start() {
     console.error('Initial log write failed', err);
   }
 
-  await authenticateServer();
-  setupDatabaseListeners();
 
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 
   app.use(express.json());
 
@@ -412,7 +427,13 @@ async function start() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Fullstack PWA application running round-the-clock on http://localhost:${PORT}`);
+    console.log(`Fullstack PWA application running round-the-clock on port ${PORT}`);
+    
+    // Запускаем авторизацию базы данных в фоне, 
+    // чтобы Render не заблокировал запуск сервера и не выкинул 502 ошибку
+    authenticateServer().then(() => {
+      setupDatabaseListeners();
+    }).catch(console.error);
   });
 }
 
