@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, addDoc, serverTimestamp, limit, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Users, MessageSquare, Send, User as UserIcon, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -26,7 +26,6 @@ export function NetworkModule() {
   useEffect(() => {
     // ИСПРАВЛЕНИЕ: убран onSnapshot на всю коллекцию users — заменён на getDoc при входе (в App.tsx)
     // Список пользователей берём из одного запроса, не слушаем изменения постоянно
-    const { getDocs } = require('firebase/firestore');
     getDocs(collection(db, 'users')).then((snap: any) => {
       const allUsers = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
       const uniqueMap = new Map();
